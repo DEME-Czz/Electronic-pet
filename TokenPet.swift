@@ -282,6 +282,39 @@ final class ProviderStore {
     }
 }
 
+enum PetAction: CaseIterable {
+    case idle
+    case wander
+    case slash
+    case jump
+    case stretch
+    case lookAround
+}
+
+struct PetPose {
+    let offsetX: CGFloat
+    let offsetY: CGFloat
+    let scaleX: CGFloat
+    let scaleY: CGFloat
+    let rotation: CGFloat
+    let shadowScaleX: CGFloat
+    let shadowScaleY: CGFloat
+    let shadowAlpha: CGFloat
+    let flipHorizontally: Bool
+
+    static let neutral = PetPose(
+        offsetX: 0,
+        offsetY: 0,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        shadowScaleX: 1,
+        shadowScaleY: 1,
+        shadowAlpha: 0.20,
+        flipHorizontally: false
+    )
+}
+
 private struct CodexSessionUsage {
     let inputTokens: Int
     let outputTokens: Int
@@ -556,6 +589,7 @@ final class PetView: NSView {
     var panelVisible = false
     var expression = "idle"
     var animationFrame = 0
+    var action = PetAction.idle
     var onSelectProvider: ((String) -> Void)?
     var onTogglePanel: (() -> Void)?
     var onRefresh: (() -> Void)?
@@ -563,6 +597,8 @@ final class PetView: NSView {
 
     private var dragStart: NSPoint?
     private var draggedDistance: CGFloat = 0
+    private var actionFrame = 0
+    private var actionDurationFrames = 40
     private let pixelPetImage: NSImage? = {
         let path = FileManager.default.currentDirectoryPath + "/assets/pixel-pet.png"
         return NSImage(contentsOfFile: path)
@@ -643,24 +679,47 @@ final class PetView: NSView {
         let bob = CGFloat(sin(Double(animationFrame) / 10.0) * 3.0)
         let scale = selectedProviderId == "all" ? 1.0 : 1.03
         let petSize = CGSize(width: 156 * scale, height: 156 * scale)
-        let petX = rect.midX - petSize.width / 2
-        let petY = rect.minY + 18 + bob
+        let pose = poseForCurrentAction(baseBob: bob)
+        let petX = rect.midX - petSize.width / 2 + pose.offsetX
+        let petY = rect.minY + 18 + pose.offsetY
 
-        let shadow = NSBezierPath(ovalIn: NSRect(x: rect.midX - 56, y: rect.minY + 10, width: 112, height: 18))
-        NSColor(calibratedWhite: 0.0, alpha: 0.20).setFill()
+        let shadowWidth = 112 * pose.shadowScaleX
+        let shadowHeight = 18 * pose.shadowScaleY
+        let shadow = NSBezierPath(ovalIn: NSRect(
+            x: rect.midX - shadowWidth / 2 + pose.offsetX * 0.45,
+            y: rect.minY + 10,
+            width: shadowWidth,
+            height: shadowHeight
+        ))
+        NSColor(calibratedWhite: 0.0, alpha: pose.shadowAlpha).setFill()
         shadow.fill()
 
         if let image = pixelPetImage {
             NSGraphicsContext.saveGraphicsState()
             let context = NSGraphicsContext.current
             context?.imageInterpolation = .none
-            image.draw(in: NSRect(origin: NSPoint(x: petX, y: petY), size: petSize),
+            let imageRect = NSRect(
+                origin: NSPoint(x: petX, y: petY),
+                size: CGSize(width: petSize.width * abs(pose.scaleX), height: petSize.height * abs(pose.scaleY))
+            )
+            let transform = NSAffineTransform()
+            transform.translateX(by: imageRect.midX, yBy: imageRect.midY)
+            if pose.flipHorizontally {
+                transform.scaleX(by: -1, yBy: 1)
+            }
+            transform.rotate(byDegrees: pose.rotation)
+            transform.translateX(by: -imageRect.midX, yBy: -imageRect.midY)
+            transform.concat()
+            image.draw(in: imageRect,
                        from: .zero,
                        operation: .sourceOver,
                        fraction: hasError ? 0.88 : 1.0,
                        respectFlipped: true,
                        hints: nil)
             NSGraphicsContext.restoreGraphicsState()
+            if action == .slash {
+                drawSlashEffect(center: NSPoint(x: imageRect.midX + 20, y: imageRect.midY + 12))
+            }
         } else {
             drawText("pet asset missing", rect: rect, fontSize: 10, color: red, bold: true, alignment: .center)
         }
@@ -943,6 +1002,152 @@ final class PetView: NSView {
         drawText(bottomText, rect: NSRect(x: rect.minX + 4, y: rect.minY + 8, width: rect.width - 8, height: 10), fontSize: 8.5, color: muted, bold: true, alignment: .center)
     }
 
+    private func poseForCurrentAction(baseBob: CGFloat) -> PetPose {
+        let progress = min(max(CGFloat(actionFrame) / CGFloat(max(actionDurationFrames, 1)), 0), 1)
+        switch action {
+        case .idle:
+            let drift = CGFloat(sin(Double(animationFrame) / 16.0) * 2.0)
+            return PetPose(
+                offsetX: drift,
+                offsetY: baseBob,
+                scaleX: 1,
+                scaleY: 1,
+                rotation: drift * 0.7,
+                shadowScaleX: 1,
+                shadowScaleY: 1,
+                shadowAlpha: 0.20,
+                flipHorizontally: false
+            )
+        case .wander:
+            let step = sin(progress * .pi * 2)
+            let lift = abs(sin(progress * .pi * 4)) * 5
+            return PetPose(
+                offsetX: step * 26,
+                offsetY: baseBob + lift,
+                scaleX: 1,
+                scaleY: 1,
+                rotation: step * 3.5,
+                shadowScaleX: 0.90,
+                shadowScaleY: 0.92,
+                shadowAlpha: 0.18,
+                flipHorizontally: step < 0
+            )
+        case .slash:
+            let swing = sin(progress * .pi)
+            return PetPose(
+                offsetX: swing * 18,
+                offsetY: baseBob + swing * 10,
+                scaleX: 1.08,
+                scaleY: 1.08,
+                rotation: -28 + swing * 36,
+                shadowScaleX: 0.82,
+                shadowScaleY: 0.85,
+                shadowAlpha: 0.16,
+                flipHorizontally: false
+            )
+        case .jump:
+            let arc = sin(progress * .pi)
+            return PetPose(
+                offsetX: 0,
+                offsetY: baseBob + arc * 34,
+                scaleX: 0.96 + arc * 0.10,
+                scaleY: 1.02 + arc * 0.06,
+                rotation: sin(progress * .pi * 2) * 4,
+                shadowScaleX: 1 - arc * 0.30,
+                shadowScaleY: 1 - arc * 0.25,
+                shadowAlpha: 0.12 + (1 - arc) * 0.06,
+                flipHorizontally: false
+            )
+        case .stretch:
+            let stretch = sin(progress * .pi)
+            return PetPose(
+                offsetX: 0,
+                offsetY: baseBob - stretch * 6,
+                scaleX: 1 - stretch * 0.12,
+                scaleY: 1 + stretch * 0.22,
+                rotation: 0,
+                shadowScaleX: 1 + stretch * 0.12,
+                shadowScaleY: 1 - stretch * 0.12,
+                shadowAlpha: 0.19,
+                flipHorizontally: false
+            )
+        case .lookAround:
+            let glance = sin(progress * .pi * 2)
+            return PetPose(
+                offsetX: glance * 8,
+                offsetY: baseBob,
+                scaleX: 1,
+                scaleY: 1,
+                rotation: glance * 6,
+                shadowScaleX: 1,
+                shadowScaleY: 1,
+                shadowAlpha: 0.20,
+                flipHorizontally: false
+            )
+        }
+    }
+
+    private func drawSlashEffect(center: NSPoint) {
+        let progress = min(max(CGFloat(actionFrame) / CGFloat(max(actionDurationFrames, 1)), 0), 1)
+        let alpha = max(0, sin(progress * .pi)) * 0.7
+        guard alpha > 0.01 else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: center.x - 56, y: center.y - 18))
+        path.curve(
+            to: NSPoint(x: center.x + 42, y: center.y + 26),
+            controlPoint1: NSPoint(x: center.x - 18, y: center.y - 36),
+            controlPoint2: NSPoint(x: center.x + 18, y: center.y + 18)
+        )
+        NSColor(calibratedRed: 0.585, green: 0.882, blue: 0.478, alpha: alpha).setStroke()
+        path.lineWidth = 8
+        path.lineCapStyle = .round
+        path.stroke()
+
+        let highlight = NSBezierPath()
+        highlight.move(to: NSPoint(x: center.x - 48, y: center.y - 12))
+        highlight.curve(
+            to: NSPoint(x: center.x + 34, y: center.y + 22),
+            controlPoint1: NSPoint(x: center.x - 14, y: center.y - 26),
+            controlPoint2: NSPoint(x: center.x + 14, y: center.y + 14)
+        )
+        NSColor.white.withAlphaComponent(alpha * 0.65).setStroke()
+        highlight.lineWidth = 3
+        highlight.lineCapStyle = .round
+        highlight.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    func tickAnimation() {
+        animationFrame += 1
+        actionFrame += 1
+        if actionFrame >= actionDurationFrames {
+            chooseNextAction()
+        }
+        needsDisplay = true
+    }
+
+    private func chooseNextAction() {
+        let pool = PetAction.allCases.filter { $0 != action }
+        action = pool.randomElement() ?? .idle
+        actionFrame = 0
+        switch action {
+        case .idle:
+            actionDurationFrames = Int.random(in: 24...42)
+        case .wander:
+            actionDurationFrames = Int.random(in: 30...44)
+        case .slash:
+            actionDurationFrames = Int.random(in: 16...24)
+        case .jump:
+            actionDurationFrames = Int.random(in: 18...26)
+        case .stretch:
+            actionDurationFrames = Int.random(in: 20...30)
+        case .lookAround:
+            actionDurationFrames = Int.random(in: 22...34)
+        }
+    }
+
     private func drawLine(from: NSPoint, to: NSPoint, width: CGFloat) {
         let path = NSBezierPath()
         path.move(to: from)
@@ -1042,8 +1247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refresh()
         }
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.09, repeats: true) { [weak self] _ in
-            self?.petView.animationFrame += 1
-            self?.petView.needsDisplay = true
+            self?.petView.tickAnimation()
         }
     }
 
