@@ -1,0 +1,39 @@
+{
+  "refresh_seconds": 3,
+  "providers": [
+    {
+      "id": "codex-local",
+      "name": "Codex Live",
+      "type": "codex_local",
+      "codex_home": "~/.codex",
+      "days": 7
+    },
+    {
+      "id": "mock-openai",
+      "name": "OpenAI Demo",
+      "type": "mock",
+      "input_tokens": 1432000,
+      "output_tokens": 492000,
+      "requests": 831,
+      "cost_usd": 8.42
+    },
+    {
+      "id": "mock-anthropic",
+      "name": "Anthropic Demo",
+      "type": "mock",
+      "input_tokens": 812000,
+      "output_tokens": 221000,
+      "requests": 404,
+      "cost_usd": 5.18
+    },
+    {
+      "id": "mock-gemini",
+      "name": "Gemini Demo",
+      "type": "mock",
+      "input_tokens": 510000,
+      "output_tokens": 144000,
+      "requests": 270,
+      "cost_usd": 1.92
+    }
+  ]
+}
