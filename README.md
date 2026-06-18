@@ -10,6 +10,7 @@
 - 双击刷新用量
 - 右键切换厂商或退出
 - 默认每 3 秒读取本机 Codex 真实会话用量
+- 宠物会随机做巡游、劈剑、跳起、伸展和左顾右盼等动作
 - 支持 Codex local、mock、本地 JSON、自定义 HTTP、OpenAI organization usage adapter
 
 ## 运行

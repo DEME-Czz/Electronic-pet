@@ -778,46 +778,46 @@ final class PetView: NSView {
 
         drawText(">_ OpenAI Codex", rect: NSRect(x: x, y: y, width: width - 60, height: 18), fontSize: 13, color: ink, bold: true)
         drawText("v\(status.cliVersion)", rect: NSRect(x: rect.maxX - 84, y: y, width: 66, height: 18), fontSize: 10, color: muted, alignment: .right)
-        y -= 24
+        y -= 21
         drawText("Visit chatgpt.com/codex/settings/usage for official limits.", rect: NSRect(x: x, y: y, width: width, height: 15), fontSize: 9, color: NSColor(calibratedRed: 0.235, green: 0.510, blue: 0.494, alpha: 1))
-        y -= 24
+        y -= 20
 
         drawStatusRow("Model:", "\(status.model) (reasoning \(status.reasoning))", x: x, y: y, width: width)
-        y -= 17
+        y -= 15
         drawStatusRow("Directory:", status.directory, x: x, y: y, width: width)
-        y -= 17
+        y -= 15
         drawStatusRow("Account:", "\(status.account) (\(status.plan))", x: x, y: y, width: width)
-        y -= 17
+        y -= 15
         drawStatusRow("Session:", shortSession(status.sessionId), x: x, y: y, width: width)
-        y -= 24
+        y -= 20
 
         let contextLeft = max(0, status.contextWindow - status.contextUsed)
         let contextPercent = status.contextWindow > 0 ? Double(contextLeft) / Double(status.contextWindow) : 0
         drawStatusRow("Context:", "\(Int(contextPercent * 100))% left (\(compactNumber(contextLeft)) left / \(compactNumber(status.contextWindow)))", x: x, y: y, width: width)
-        y -= 21
+        y -= 18
 
         drawLimitRow(
-            "5h remaining:",
+            "5h",
             usedPercent: status.primaryUsedPercent,
             resetAt: status.primaryResetAt,
             x: x,
             y: y,
             width: width
         )
-        y -= 21
+        y -= 25
         drawLimitRow(
-            "Weekly:",
+            "Weekly",
             usedPercent: status.secondaryUsedPercent,
             resetAt: status.secondaryResetAt,
             x: x,
             y: y,
             width: width
         )
-        y -= 24
+        y -= 28
 
         let fiveHourRemaining = remainingPercent(usedPercent: status.primaryUsedPercent)
         let fiveHourText = status.primaryUsedPercent == nil ? "unknown" : "\(Int(fiveHourRemaining))%"
-        drawText("5h remaining: \(fiveHourText) · records \(compactNumber(snapshot.requests)) · \(snapshot.message)", rect: NSRect(x: x, y: y, width: width, height: 15), fontSize: 9, color: muted)
+        drawText("5h remaining: \(fiveHourText) · records \(compactNumber(snapshot.requests)) · \(snapshot.message)", rect: NSRect(x: x, y: y, width: width, height: 13), fontSize: 8.5, color: muted)
     }
 
     private func drawStatusRow(_ label: String, _ value: String, x: CGFloat, y: CGFloat, width: CGFloat) {
@@ -827,10 +827,27 @@ final class PetView: NSView {
 
     private func drawLimitRow(_ label: String, usedPercent: Double?, resetAt: Date?, x: CGFloat, y: CGFloat, width: CGFloat) {
         let left = remainingPercent(usedPercent: usedPercent)
-        drawText(label, rect: NSRect(x: x, y: y, width: 78, height: 15), fontSize: 10, color: muted)
-        drawProgressBar(leftPercent: left, rect: NSRect(x: x + 86, y: y + 2, width: 88, height: 10))
-        let reset = resetAt.map { " (resets \(timeString($0)))" } ?? ""
-        drawText("\(Int(left))% remaining\(reset)", rect: NSRect(x: x + 184, y: y, width: width - 184, height: 15), fontSize: 10, color: ink)
+        let labelWidth: CGFloat = 50
+        let barWidth: CGFloat = 108
+        let percentWidth: CGFloat = 96
+
+        drawText(label, rect: NSRect(x: x, y: y, width: labelWidth, height: 15), fontSize: 10, color: muted)
+        drawProgressBar(leftPercent: left, rect: NSRect(x: x + labelWidth + 8, y: y + 2, width: barWidth, height: 10))
+        drawText(
+            "\(Int(left))% remaining",
+            rect: NSRect(x: x + labelWidth + 8 + barWidth + 10, y: y, width: percentWidth, height: 15),
+            fontSize: 10,
+            color: ink
+        )
+
+        if let resetAt {
+            drawText(
+                "resets \(resetTimeString(resetAt))",
+                rect: NSRect(x: x + labelWidth + 8, y: y - 10, width: width - labelWidth - 8, height: 12),
+                fontSize: 8.5,
+                color: muted
+            )
+        }
     }
 
     private func drawProgressBar(leftPercent: Double, rect: NSRect) {
@@ -1510,7 +1527,7 @@ func limitPercentText(usedPercent: Double?) -> String {
 func limitLine(usedPercent: Double?, resetAt: Date?) -> String {
     guard let usedPercent else { return "unknown" }
     let left = remainingPercent(usedPercent: usedPercent)
-    let reset = resetAt.map { " (resets \(timeString($0)))" } ?? ""
+    let reset = resetAt.map { " (resets \(resetTimeString($0)))" } ?? ""
     return "\(Int(left))% remaining\(reset)"
 }
 
@@ -1555,6 +1572,17 @@ func compactNumber(_ value: Int) -> String {
 func timeString(_ date: Date) -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "HH:mm:ss"
+    return formatter.string(from: date)
+}
+
+func resetTimeString(_ date: Date) -> String {
+    let calendar = Calendar.current
+    let formatter = DateFormatter()
+    if calendar.isDateInToday(date) {
+        formatter.dateFormat = "HH:mm:ss"
+    } else {
+        formatter.dateFormat = "HH:mm 'on' d MMM"
+    }
     return formatter.string(from: date)
 }
 
