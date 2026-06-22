@@ -724,18 +724,20 @@ final class PetView: NSView {
             drawText("pet asset missing", rect: rect, fontSize: 10, color: red, bold: true, alignment: .center)
         }
 
-        if let codexStatus = selected.first?.codexStatus {
-            drawLimitBadge(
-                topText: "5h: \(limitPercentText(usedPercent: codexStatus.primaryUsedPercent))",
-                bottomText: "7d: \(limitPercentText(usedPercent: codexStatus.secondaryUsedPercent))",
-                center: NSPoint(x: rect.midX + 56, y: rect.minY + 148)
-            )
-        } else if expression == "working" {
-            drawStatusPip("...", center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: green)
-        } else if hasError {
-            drawStatusPip("!", center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: red)
-        } else {
-            drawStatusPip(compactNumber(total), center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: usageColor(total))
+        if !panelVisible {
+            if let codexStatus = selected.first?.codexStatus {
+                drawLimitBadge(
+                    topText: "5h: \(limitPercentText(usedPercent: codexStatus.primaryUsedPercent))",
+                    bottomText: "7d: \(limitPercentText(usedPercent: codexStatus.secondaryUsedPercent))",
+                    center: NSPoint(x: rect.midX + 56, y: rect.minY + 148)
+                )
+            } else if expression == "working" {
+                drawStatusPip("...", center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: green)
+            } else if hasError {
+                drawStatusPip("!", center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: red)
+            } else {
+                drawStatusPip(compactNumber(total), center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: usageColor(total))
+            }
         }
     }
 
