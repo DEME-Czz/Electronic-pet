@@ -726,10 +726,12 @@ final class PetView: NSView {
 
         if !panelVisible {
             if let codexStatus = selected.first?.codexStatus {
+                let contextRemaining = contextRemainingPercent(codexStatus)
                 drawLimitBadge(
                     topText: "5h: \(limitPercentText(usedPercent: codexStatus.primaryUsedPercent))",
                     bottomText: "7d: \(limitPercentText(usedPercent: codexStatus.secondaryUsedPercent))",
-                    center: NSPoint(x: rect.midX + 56, y: rect.minY + 148)
+                    center: NSPoint(x: rect.midX + 56, y: rect.minY + 148),
+                    backgroundColor: limitBadgeBackgroundColor(contextRemainingPercent: contextRemaining)
                 )
             } else if expression == "working" {
                 drawStatusPip("...", center: NSPoint(x: rect.midX + 56, y: rect.minY + 148), color: green)
@@ -820,6 +822,12 @@ final class PetView: NSView {
         let fiveHourRemaining = remainingPercent(usedPercent: status.primaryUsedPercent)
         let fiveHourText = status.primaryUsedPercent == nil ? "unknown" : "\(Int(fiveHourRemaining))%"
         drawText("5h remaining: \(fiveHourText) · records \(compactNumber(snapshot.requests)) · \(snapshot.message)", rect: NSRect(x: x, y: y, width: width, height: 13), fontSize: 8.5, color: muted)
+    }
+
+    private func contextRemainingPercent(_ status: CodexStatus) -> Double {
+        guard status.contextWindow > 0 else { return 100 }
+        let used = min(max(status.contextUsed, 0), status.contextWindow)
+        return max(0, min(100, Double(status.contextWindow - used) / Double(status.contextWindow) * 100))
     }
 
     private func drawStatusRow(_ label: String, _ value: String, x: CGFloat, y: CGFloat, width: CGFloat) {
@@ -1001,7 +1009,7 @@ final class PetView: NSView {
         drawText(text, rect: NSRect(x: rect.minX + 4, y: rect.minY + 6, width: rect.width - 8, height: 14), fontSize: 10, color: darken(color, amount: 0.38), bold: true, alignment: .center)
     }
 
-    private func drawLimitBadge(topText: String, bottomText: String, center: NSPoint) {
+    private func drawLimitBadge(topText: String, bottomText: String, center: NSPoint, backgroundColor: NSColor = .white) {
         let rect = NSRect(x: center.x - 30, y: center.y - 18, width: 60, height: 38)
         let path = NSBezierPath(roundedRect: rect, xRadius: 16, yRadius: 16)
         NSGraphicsContext.saveGraphicsState()
@@ -1010,7 +1018,7 @@ final class PetView: NSView {
         shadow.shadowBlurRadius = 8
         shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.18)
         shadow.set()
-        NSColor.white.withAlphaComponent(0.96).setFill()
+        backgroundColor.withAlphaComponent(0.96).setFill()
         path.fill()
         NSGraphicsContext.restoreGraphicsState()
         line.withAlphaComponent(0.55).setStroke()
@@ -1019,6 +1027,23 @@ final class PetView: NSView {
 
         drawText(topText, rect: NSRect(x: rect.minX + 4, y: rect.minY + 20, width: rect.width - 8, height: 10), fontSize: 8.5, color: muted, bold: true, alignment: .center)
         drawText(bottomText, rect: NSRect(x: rect.minX + 4, y: rect.minY + 8, width: rect.width - 8, height: 10), fontSize: 8.5, color: muted, bold: true, alignment: .center)
+    }
+
+    private func limitBadgeBackgroundColor(contextRemainingPercent: Double) -> NSColor {
+        if contextRemainingPercent >= 50 {
+            return .white
+        }
+
+        let phase = Double(animationFrame) / 8.0
+        let hue = (sin(phase) + 1) / 2
+        let saturation = 0.18 + 0.12 * (1 - contextRemainingPercent / 50.0)
+        let brightness = 0.96 - 0.06 * (1 - contextRemainingPercent / 50.0)
+        return NSColor(
+            calibratedHue: CGFloat(hue),
+            saturation: CGFloat(saturation),
+            brightness: CGFloat(brightness),
+            alpha: 1.0
+        )
     }
 
     private func poseForCurrentAction(baseBob: CGFloat) -> PetPose {
