@@ -11,6 +11,11 @@ let red = NSColor(calibratedRed: 0.851, green: 0.357, blue: 0.310, alpha: 1.0)
 let blue = NSColor(calibratedRed: 0.247, green: 0.498, blue: 0.749, alpha: 1.0)
 let cream = NSColor(calibratedRed: 1.0, green: 0.953, blue: 0.792, alpha: 1.0)
 let glass = NSColor(calibratedRed: 0.996, green: 0.973, blue: 0.914, alpha: 0.92)
+let panelLabel = NSColor(calibratedRed: 0.506, green: 0.459, blue: 0.384, alpha: 1.0)
+let panelValue = NSColor(calibratedRed: 0.168, green: 0.141, blue: 0.104, alpha: 1.0)
+let panelTitle = NSColor(calibratedRed: 0.109, green: 0.098, blue: 0.078, alpha: 1.0)
+let panelSubtle = NSColor(calibratedRed: 0.376, green: 0.341, blue: 0.286, alpha: 1.0)
+let panelAccent = NSColor(calibratedRed: 0.231, green: 0.455, blue: 0.651, alpha: 1.0)
 
 struct UsageSnapshot {
     let providerId: String
@@ -43,6 +48,29 @@ struct CodexStatus {
     let primaryResetAt: Date?
     let secondaryUsedPercent: Double?
     let secondaryResetAt: Date?
+    let sessions: [CodexSessionStatus]
+}
+
+struct CodexSessionStatus {
+    let sessionId: String
+    let directory: String
+    let model: String
+    let reasoning: String
+    let cliVersion: String
+    let updatedAt: Date
+    let contextUsed: Int
+    let contextWindow: Int
+    let primaryUsedPercent: Double?
+    let primaryResetAt: Date?
+    let secondaryUsedPercent: Double?
+    let secondaryResetAt: Date?
+    let inputTokens: Int
+    let outputTokens: Int
+    let requestCount: Int
+
+    var totalTokens: Int {
+        inputTokens + outputTokens
+    }
 }
 
 final class ProviderStore {
@@ -229,7 +257,8 @@ final class ProviderStore {
             primaryUsedPercent: summary.primaryLimit,
             primaryResetAt: summary.primaryResetAt,
             secondaryUsedPercent: summary.secondaryLimit,
-            secondaryResetAt: summary.secondaryResetAt
+            secondaryResetAt: summary.secondaryResetAt,
+            sessions: summary.sessions
         )
     }
 
@@ -350,6 +379,7 @@ private struct CodexUsageSummary {
     let secondaryResetAt: Date?
     let changedFiles: Int
     let latestMeta: CodexSessionMeta?
+    let sessions: [CodexSessionStatus]
 }
 
 private final class CodexFileState {
@@ -479,11 +509,13 @@ private final class CodexUsageAccumulator {
 
         if object["type"] as? String == "session_meta",
            let payload = object["payload"] as? [String: Any] {
+            let model = codexMetaString(payload, keys: ["model", "model_name", "model_slug"])
+            let effort = codexMetaString(payload, keys: ["effort", "reasoning_effort", "model_reasoning_effort"])
             state.meta = CodexSessionMeta(
                 sessionId: payload["id"] as? String ?? "",
                 cwd: payload["cwd"] as? String ?? "",
-                model: payload["model"] as? String ?? "",
-                effort: payload["effort"] as? String ?? "",
+                model: model,
+                effort: effort,
                 cliVersion: payload["cli_version"] as? String ?? ""
             )
             return
@@ -544,6 +576,7 @@ private final class CodexUsageAccumulator {
         var secondaryLimit: Double?
         var secondaryResetAt: Date?
         var latestMeta: CodexSessionMeta?
+        var sessions: [CodexSessionStatus] = []
 
         for state in files.values {
             guard let usage = state.usage else {
@@ -563,7 +596,28 @@ private final class CodexUsageAccumulator {
                 secondaryResetAt = usage.secondaryResetAt
                 latestMeta = state.meta
             }
+
+            let meta = state.meta
+            sessions.append(CodexSessionStatus(
+                sessionId: nonEmpty(meta?.sessionId) ?? "-",
+                directory: abbreviateHome(nonEmpty(meta?.cwd) ?? FileManager.default.currentDirectoryPath),
+                model: nonEmpty(meta?.model) ?? "unknown",
+                reasoning: nonEmpty(meta?.effort) ?? "unknown",
+                cliVersion: nonEmpty(meta?.cliVersion) ?? "unknown",
+                updatedAt: usage.updatedAt,
+                contextUsed: usage.contextUsed,
+                contextWindow: usage.contextWindow,
+                primaryUsedPercent: usage.primaryLimit,
+                primaryResetAt: usage.primaryResetAt,
+                secondaryUsedPercent: usage.secondaryLimit,
+                secondaryResetAt: usage.secondaryResetAt,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                requestCount: usage.requestCount
+            ))
         }
+
+        sessions.sort { $0.updatedAt > $1.updatedAt }
 
         return CodexUsageSummary(
             inputTokens: inputTokens,
@@ -578,7 +632,8 @@ private final class CodexUsageAccumulator {
             secondaryLimit: secondaryLimit,
             secondaryResetAt: secondaryResetAt,
             changedFiles: changedFiles,
-            latestMeta: latestMeta
+            latestMeta: latestMeta,
+            sessions: sessions
         )
     }
 }
@@ -776,6 +831,14 @@ final class PetView: NSView {
 
     private func drawCodexStatusPanel(_ status: CodexStatus, snapshot: UsageSnapshot, in rect: NSRect) {
         drawSpeechBubble(rect)
+        if status.sessions.count > 1 {
+            drawCodexMultiSessionPanel(status, snapshot: snapshot, in: rect)
+        } else {
+            drawCodexSingleSessionPanel(status, snapshot: snapshot, in: rect)
+        }
+    }
+
+    private func drawCodexSingleSessionPanel(_ status: CodexStatus, snapshot: UsageSnapshot, in rect: NSRect) {
         let x = rect.minX + 18
         var y = rect.maxY - 28
         let width = rect.width - 34
@@ -822,6 +885,100 @@ final class PetView: NSView {
         let fiveHourRemaining = remainingPercent(usedPercent: status.primaryUsedPercent)
         let fiveHourText = status.primaryUsedPercent == nil ? "unknown" : "\(Int(fiveHourRemaining))%"
         drawText("5h remaining: \(fiveHourText) · records \(compactNumber(snapshot.requests)) · \(snapshot.message)", rect: NSRect(x: x, y: y, width: width, height: 13), fontSize: 8.5, color: muted)
+    }
+
+    private func drawCodexMultiSessionPanel(_ status: CodexStatus, snapshot: UsageSnapshot, in rect: NSRect) {
+        let x = rect.minX + 18
+        var y = rect.maxY - 28
+        let width = rect.width - 34
+        let sessions = Array(status.sessions.sorted {
+            if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+            return $0.sessionId < $1.sessionId
+        }.prefix(3))
+
+        drawText(">_ OpenAI Codex", rect: NSRect(x: x, y: y, width: width - 60, height: 18), fontSize: 13, color: ink, bold: true)
+        drawText("v\(status.cliVersion)", rect: NSRect(x: rect.maxX - 84, y: y, width: 66, height: 18), fontSize: 10, color: muted, alignment: .right)
+        y -= 21
+
+        let cardGap: CGFloat = 6
+        let cardWidth = width
+        let cardHeight: CGFloat = 50
+        let titleHeight: CGFloat = 10
+        let fieldGap: CGFloat = 8
+        let columnWidth = floor((cardWidth - 20 - fieldGap) / 2)
+        let contentDrop: CGFloat = 4
+        if let primaryResetAt = status.primaryResetAt, let secondaryResetAt = status.secondaryResetAt {
+            drawText(
+                "5h \(resetTimeString(primaryResetAt)) · 7d \(resetTimeString(secondaryResetAt))",
+                rect: NSRect(x: x, y: y - contentDrop + 7, width: width, height: 12),
+                fontSize: 8.0,
+                color: panelSubtle
+            )
+        }
+
+        for (index, session) in sessions.enumerated() {
+            let cardX = x
+            let cardY = y - CGFloat(index) * (cardHeight + cardGap)
+            let cardRect = NSRect(x: cardX, y: cardY - cardHeight, width: cardWidth, height: cardHeight)
+            let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: 12, yRadius: 12)
+            let fillColor = index == 0
+                ? NSColor(calibratedRed: 1.0, green: 0.985, blue: 0.952, alpha: 0.98)
+                : NSColor(calibratedRed: 0.998, green: 0.993, blue: 0.983, alpha: 0.95)
+            fillColor.setFill()
+            cardPath.fill()
+            NSColor(calibratedWhite: 0.74, alpha: index == 0 ? 0.20 : 0.12).setStroke()
+            cardPath.lineWidth = 1
+            cardPath.stroke()
+
+            let headerY = cardY - 10 - contentDrop
+            drawText(
+                shortPathDisplay(session.directory, maxLength: 30),
+                rect: NSRect(x: cardX + 10, y: headerY, width: cardWidth - 20, height: titleHeight),
+                fontSize: 8.0,
+                color: panelTitle,
+                bold: true
+            )
+
+            let sessionIdY = cardY - 23 - contentDrop
+            drawText(
+                "Session ID",
+                rect: NSRect(x: cardX + 10, y: sessionIdY, width: 66, height: 9),
+                fontSize: 7.2,
+                color: panelLabel,
+                bold: true
+            )
+            drawText(
+                shortSession(session.sessionId),
+                rect: NSRect(x: cardX + 70, y: sessionIdY, width: cardWidth - 80, height: 9),
+                fontSize: 8.0,
+                color: panelValue,
+                bold: true
+            )
+
+            let line1Y = cardY - 34 - contentDrop
+            let modelValue = shortModel(session.model == "unknown" ? status.model : session.model)
+            drawCardField(
+                label: "Context",
+                value: contextPercentText(session),
+                x: cardX + 10,
+                y: line1Y,
+                width: columnWidth,
+                valueColor: contextColor(session)
+            )
+            drawCardField(
+                label: "Model",
+                value: modelValue,
+                x: cardX + 10 + columnWidth + fieldGap,
+                y: line1Y,
+                width: columnWidth,
+                valueColor: panelValue
+            )
+        }
+    }
+
+    private func drawCardField(label: String, value: String, x: CGFloat, y: CGFloat, width: CGFloat, valueColor: NSColor) {
+        drawText(label, rect: NSRect(x: x, y: y, width: width, height: 9), fontSize: 7.4, color: panelLabel, bold: true)
+        drawText(value, rect: NSRect(x: x, y: y - 10, width: width, height: 12), fontSize: 8.4, color: valueColor, bold: true)
     }
 
     private func contextRemainingPercent(_ status: CodexStatus) -> Double {
@@ -1320,11 +1477,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func togglePanel() {
         petView.panelVisible.toggle()
-        let width: CGFloat = petView.panelVisible ? 560 : 210
+        let hasMultiSessionCodex = petView.snapshots.contains { $0.codexStatus?.sessions.count ?? 0 > 1 }
+        let width: CGFloat = petView.panelVisible ? (hasMultiSessionCodex ? 490 : 560) : 210
+        let height: CGFloat = petView.panelVisible ? (hasMultiSessionCodex ? 276 : 230) : 230
         var frame = window.frame
         frame.size.width = width
+        frame.size.height = height
         window.setFrame(frame, display: true, animate: true)
         petView.frame.size.width = width
+        petView.frame.size.height = height
         petView.needsDisplay = true
     }
 }
@@ -1441,6 +1602,25 @@ func abbreviateHome(_ path: String) -> String {
     return path
 }
 
+func shortPathDisplay(_ path: String, maxLength: Int = 28) -> String {
+    let value = abbreviateHome(path)
+    if value.count <= maxLength {
+        return value
+    }
+
+    let parts = value.split(separator: "/")
+    if parts.count >= 2 {
+        let tail = parts.suffix(2).joined(separator: "/")
+        let prefix = value.hasPrefix("~") ? "~/" : "…/"
+        let candidate = prefix + tail
+        if candidate.count <= maxLength {
+            return candidate
+        }
+    }
+
+    return "…" + value.suffix(max(0, maxLength - 1))
+}
+
 private func latestContextUsed(summary: CodexUsageSummary) -> Int {
     guard summary.contextWindow > 0 else { return summary.contextUsed }
     return min(summary.contextUsed, summary.contextWindow)
@@ -1551,6 +1731,70 @@ func limitPercentText(usedPercent: Double?) -> String {
     return "\(Int(remainingPercent(usedPercent: usedPercent)))%"
 }
 
+func contextPercentText(_ session: CodexSessionStatus) -> String {
+    guard session.contextWindow > 0 else { return "?" }
+    let used = min(max(session.contextUsed, 0), session.contextWindow)
+    let left = max(0, session.contextWindow - used)
+    return "\(Int(Double(left) / Double(session.contextWindow) * 100))% left"
+}
+
+func contextRemainingPercentValue(_ session: CodexSessionStatus) -> Double {
+    guard session.contextWindow > 0 else { return 0 }
+    let used = min(max(session.contextUsed, 0), session.contextWindow)
+    return Double(session.contextWindow - used) / Double(session.contextWindow) * 100
+}
+
+func contextColor(_ session: CodexSessionStatus) -> NSColor {
+    let remaining = contextRemainingPercentValue(session)
+    if remaining >= 50 { return green }
+    if remaining >= 20 { return yellow }
+    return red
+}
+
+func shortModel(_ model: String) -> String {
+    let display = model.isEmpty ? "unknown" : model
+    if display.count <= 16 {
+        return display
+    }
+    return String(display.prefix(13)) + "..."
+}
+
+func codexMetaString(_ payload: [String: Any], keys: [String]) -> String {
+    for key in keys {
+        if let value = nonEmpty(payload[key] as? String) {
+            return value
+        }
+    }
+    if let value = codexMetaStringDeep(payload, keyMatchers: keys) {
+        return value
+    }
+    return ""
+}
+
+func codexMetaStringDeep(_ value: Any, keyMatchers: [String]) -> String? {
+    let loweredMatchers = keyMatchers.map { $0.lowercased() }
+    if let dict = value as? [String: Any] {
+        for (key, nested) in dict {
+            let loweredKey = key.lowercased()
+            if loweredMatchers.contains(where: { loweredKey == $0 || loweredKey.contains($0) }) {
+                if let string = nested as? String, !string.isEmpty {
+                    return string
+                }
+            }
+            if let nestedString = codexMetaStringDeep(nested, keyMatchers: keyMatchers) {
+                return nestedString
+            }
+        }
+    } else if let array = value as? [Any] {
+        for item in array {
+            if let nestedString = codexMetaStringDeep(item, keyMatchers: keyMatchers) {
+                return nestedString
+            }
+        }
+    }
+    return nil
+}
+
 func limitLine(usedPercent: Double?, resetAt: Date?) -> String {
     guard let usedPercent else { return "unknown" }
     let left = remainingPercent(usedPercent: usedPercent)
@@ -1605,11 +1849,10 @@ func timeString(_ date: Date) -> String {
 func resetTimeString(_ date: Date) -> String {
     let calendar = Calendar.current
     let formatter = DateFormatter()
-    if calendar.isDateInToday(date) {
-        formatter.dateFormat = "HH:mm:ss"
-    } else {
-        formatter.dateFormat = "HH:mm 'on' d MMM"
-    }
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = calendar
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
     return formatter.string(from: date)
 }
 
