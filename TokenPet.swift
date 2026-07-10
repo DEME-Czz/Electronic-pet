@@ -503,12 +503,12 @@ private final class CodexUsageAccumulator {
 
     private func parseLine(_ line: String, into state: CodexFileState, cutoff: Date) {
         guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let object = jsonObjectValue(data) else {
             return
         }
 
         if object["type"] as? String == "session_meta",
-           let payload = object["payload"] as? [String: Any] {
+           let payload = stringKeyedDictionary(object["payload"]) {
             let model = codexMetaString(payload, keys: ["model", "model_name", "model_slug"])
             let effort = codexMetaString(payload, keys: ["effort", "reasoning_effort", "model_reasoning_effort"])
             state.meta = CodexSessionMeta(
@@ -522,15 +522,15 @@ private final class CodexUsageAccumulator {
         }
 
         guard object["type"] as? String == "event_msg",
-              let payload = object["payload"] as? [String: Any],
+              let payload = stringKeyedDictionary(object["payload"]),
               payload["type"] as? String == "token_count",
               let timestampText = object["timestamp"] as? String,
               let timestamp = parseCodexTimestamp(timestampText),
-              let info = payload["info"] as? [String: Any],
-              let totalUsage = info["total_token_usage"] as? [String: Any] else {
+              let info = stringKeyedDictionary(payload["info"]),
+              let totalUsage = stringKeyedDictionary(info["total_token_usage"]) else {
             return
         }
-        let lastUsage = info["last_token_usage"] as? [String: Any]
+        let lastUsage = stringKeyedDictionary(info["last_token_usage"])
 
         let totalTokens = intValue(totalUsage["total_tokens"])
         state.seenTotals.insert(totalTokens)
@@ -538,9 +538,9 @@ private final class CodexUsageAccumulator {
             return
         }
 
-        let rateLimits = payload["rate_limits"] as? [String: Any]
-        let primary = rateLimits?["primary"] as? [String: Any]
-        let secondary = rateLimits?["secondary"] as? [String: Any]
+        let rateLimits = stringKeyedDictionary(payload["rate_limits"])
+        let primary = stringKeyedDictionary(rateLimits?["primary"])
+        let secondary = stringKeyedDictionary(rateLimits?["secondary"])
         state.usage = CodexSessionUsage(
             inputTokens: intValue(totalUsage["input_tokens"]),
             outputTokens: intValue(totalUsage["output_tokens"]),
@@ -1521,10 +1521,20 @@ func syncRequest(_ request: URLRequest) throws -> Data {
 }
 
 func jsonObject(_ data: Data) throws -> [String: Any] {
-    guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    guard let object = jsonObjectValue(data) else {
         throw RuntimeError("expected JSON object")
     }
     return object
+}
+
+func jsonObjectValue(_ data: Data) -> [String: Any]? {
+    guard let object = try? JSONSerialization.jsonObject(with: data) else {
+        return nil
+    }
+    if let dict = object as? [String: Any] {
+        return dict
+    }
+    return stringKeyedDictionary(object)
 }
 
 func readCodexConfig(homeUrl: URL) -> (model: String, reasoning: String) {
@@ -1577,7 +1587,7 @@ func decodeJwtPayload(_ token: String) -> [String: Any]? {
 func payloadValue(_ payload: [String: Any], path: [String]) -> String? {
     var current: Any? = payload
     for key in path {
-        current = (current as? [String: Any])?[key]
+        current = stringKeyedDictionary(current)?[key]
     }
     return current as? String
 }
@@ -1773,7 +1783,7 @@ func codexMetaString(_ payload: [String: Any], keys: [String]) -> String {
 
 func codexMetaStringDeep(_ value: Any, keyMatchers: [String]) -> String? {
     let loweredMatchers = keyMatchers.map { $0.lowercased() }
-    if let dict = value as? [String: Any] {
+    if let dict = stringKeyedDictionary(value) {
         for (key, nested) in dict {
             let loweredKey = key.lowercased()
             if loweredMatchers.contains(where: { loweredKey == $0 || loweredKey.contains($0) }) {
@@ -1785,7 +1795,7 @@ func codexMetaStringDeep(_ value: Any, keyMatchers: [String]) -> String? {
                 return nestedString
             }
         }
-    } else if let array = value as? [Any] {
+    } else if let array = arrayValue(value) {
         for item in array {
             if let nestedString = codexMetaStringDeep(item, keyMatchers: keyMatchers) {
                 return nestedString
@@ -1827,6 +1837,35 @@ func mix(_ color: NSColor, with other: NSColor, amount: CGFloat) -> NSColor {
         blue: base.blueComponent * (1 - t) + target.blueComponent * t,
         alpha: base.alphaComponent
     )
+}
+
+func stringKeyedDictionary(_ value: Any?) -> [String: Any]? {
+    guard let dict = value as? [String: Any] else {
+        if let dict = value as? NSDictionary {
+            var result: [String: Any] = [:]
+            result.reserveCapacity(dict.count)
+            for (key, nested) in dict {
+                guard let key = key as? String else {
+                    continue
+                }
+                result[key] = nested
+            }
+            return result
+        }
+        return nil
+    }
+
+    return dict
+}
+
+func arrayValue(_ value: Any?) -> [Any]? {
+    if let array = value as? [Any] {
+        return array
+    }
+    if let array = value as? NSArray {
+        return array.map { $0 }
+    }
+    return nil
 }
 
 func compactNumber(_ value: Int) -> String {
